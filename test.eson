@@ -1,0 +1,31 @@
+// Hello
+{
+	"abc": 123 /* How are you */,
+	abc123: {
+		xyz: "zyx",
+		test: ["abc", "def"],
+		test2: [
+			"abc",
+			123,
+			true,
+			"def",
+		],
+		symbol: Symbol("abc"),
+		["test3"]: 3,
+		[Symbol("test4")]: -123.456,
+		test5: {
+			x: 1,
+			y: 1,
+			z: 1,
+			w: 1,
+		},
+		p1: Person {
+			name: "Jimmy",
+			age: 3,
+		},
+		p2: Person2 {
+			name: "Bobby",
+			age: 57,
+		}
+	},
+}
