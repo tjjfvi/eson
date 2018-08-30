@@ -3,11 +3,16 @@ console.log();
 const fs = require("fs-extra");
 
 const { Lexer } = require("./lexer.js");
-const { Parser } = require("./parser.js")
+const { Parser } = require("./parser.js");
+
+const jsStringEscape = require("js-string-escape");
 
 const lexer = new Lexer();
 
-const parser = new Parser(lexer);
+const parser = new Parser(lexer, false);
+
+const varnameRegex = /[^\s:,()\[\]\{\}?\~"'+\-*\/\\#!$^&|`=\.\d](?:[^\s:,()\[\]\{\}?\~"'+\-*\/\\#!$^&|`=\.])*/g;
+const varnameRegexAll = /^[^\s:,()\[\]\{\}?\~"'+\-*\/\\#!$^&|`=\.\d](?:[^\s:,()\[\]\{\}?\~"'+\-*\/\\#!$^&|`=\.])*$/;
 
 lexer.addRule({ regex: /(['"])(([^\\\n]|\\[^])*?)\1/g, tokenName: "string", priority: 5 });
 
@@ -20,8 +25,8 @@ lexer.addRule({ regex: /false/g, tokenName: "false", priority: 3 });
 lexer.addRule({ regex: /undefined/g, tokenName: "undefined", priority: 3 });
 lexer.addRule({ regex: /null/g, tokenName: "null", priority: 3 });
 
-lexer.addRule({ regex: /[^\s:,()\[\]\{\}?\~"'+\-*\/\\#!$^&|`=\.\d](?:[^\s:,()\[\]\{\}?\~"'+\-*\/\\#!$^&|`=\.])*/g, tokenName: "varname", priority: 2 });
-lexer.addRule({ regex: /-?(\d+(\.\d*)?|(\d*\.)?\d+)/g, tokenName: "number", priority: 1.5 });
+lexer.addRule({ regex: varnameRegex, tokenName: "varname", priority: 2 });
+lexer.addRule({ regex: /-?(\d+(\.\d*)?|(\d*\.)?\d+)(e[+-]?\d+)?|NaN|[+-]?Infinity/g, tokenName: "number", priority: 1.5 });
 
 lexer.addRule({ regex: /\{/g, tokenName: "openBrace", priority: 1 });
 lexer.addRule({ regex: /\}/g, tokenName: "closeBrace", priority: 1 });
@@ -39,17 +44,17 @@ lexer.discard = "white, singleComment, multiComment".split(", ");
 parser.topLevelRule = "expression";
 
 parser.addRule("expression", [ [], ["object"], ["array"], ["symbol"], ["number"], ["string"], ["true"], ["false"], ["undefined"], ["null"] ]);
-parser.addRule("expressions", [ ["expression"], ["expression", "comma"], ["expression", "comma", "expressions"] ]);
+parser.addRule("expressions", [ [], ["expression"], ["expression", "comma"], ["expression", "comma", "expressions"] ]);
 
-parser.addRule("keyValPair", [ [], ["varname", "colon", "expression"], ["string", "colon", "expression"], ["openBracket", "expression", "closeBracket", "colon", "expression"] ]);
-parser.addRule("keyValPairs", [ ["keyValPair"], ["keyValPair", "comma"], ["keyValPair", "comma", "keyValPairs"] ]);
+parser.addRule("keyValPair", [ ["varname", "colon", "expression"], ["string", "colon", "expression"], ["openBracket", "expression", "closeBracket", "colon", "expression"] ]);
+parser.addRule("keyValPairs", [ [], ["keyValPair"], ["keyValPair", "comma"], ["keyValPair", "comma", "keyValPairs"] ]);
 
 parser.addRule("object", [ ["openBrace", "keyValPairs", "closeBrace"], ["varname", "openBrace", "keyValPairs", "closeBrace"] ]);
 parser.addRule("array", [ ["openBracket", "expressions", "closeBracket"] ]);
 parser.addRule("symbol", [ ["symbolClass", "openParen", "string", "closeParen"] ]);
 
 function consumeParseTree(tree){
-	if(tree.ruleName === "expression" && tree.children.length) return consumeParseTree(tree.children[0]);
+	if(tree.ruleName === "expression" && tree.children.length) return tree.children.length ? consumeParseTree(tree.children[0]) : undefined;
 
 	if(tree.leaf) return (
 		tree.token.name === "number" ?
@@ -78,7 +83,8 @@ function consumeParseTree(tree){
 			null :
 		tree.token.name === "varname" ?
 			tree.token.text :
-		new Error(`Cannot convert '${tree.token.name}' to JS type`)
+
+			new Error(`Cannot convert '${tree.token.name}' to JS type`)
 	);
 
 	if(tree.ruleName === "symbol") {
@@ -104,18 +110,22 @@ function consumeParseTree(tree){
 		}
 	}
 
-	if(tree.ruleName === "keyValPairs") return Object.assign(
+	if(tree.ruleName === "keyValPairs") return tree.children.length ? Object.assign(
 		consumeParseTree(tree.children[0]),
 		tree.children[2] ? consumeParseTree(tree.children[2]) : {},
+	) : {};
+
+	if(tree.ruleName === "keyValPair") return (
+		tree.children.length ?
+			{ [consumeParseTree(tree.children[tree.ruleIndex === 2 ? 1 : 0])]: consumeParseTree(tree.children[tree.ruleIndex === 2 ? 4 : 2]) } :
+
+			{}
 	);
 
-	if(tree.ruleName === "keyValPair")
-		return { [consumeParseTree(tree.children[tree.ruleIndex === 3 ? 1 : 0])]: consumeParseTree(tree.children[tree.ruleIndex === 3 ? 4 : 2]) };
-
-	if(tree.ruleName === "expressions") return [
-		consumeParseTree(tree.children[0]),
-		...(tree.children[2] ? consumeParseTree(tree.children[2]) : []),
-	];
+	if(tree.ruleName === "expressions") return tree.children.length ? [].concat(
+		tree.children[0].ruleIndex ? [consumeParseTree(tree.children[0])] : [,],
+		tree.children[2] ? consumeParseTree(tree.children[2]) : [],
+	) : [];
 }
 
 function config(options){
@@ -124,14 +134,34 @@ function config(options){
 		classDictionary: {
 			Person: ({ name, age }) => new Person(name, age),
 			Animal,
-		}
+		},
+		stringify: {
+			minify: false,
+			quote: '"',
+			tab: "\t",
+			arrayTrailingComma: true,
+			objectTrailingComma: true,
+		},
 	} */
 	Object.assign(config, options);
 }
 
+function formatTree(tree){
+	return (
+		tree.leaf ?
+			`${tree.token.name} ${require("util").inspect(tree.token.text)}`
+		:	`${tree.ruleName}\n${tree.children.map(formatTree).join("\n").split("\n").map(l => `  ${l}`).join("\n")}`
+	);
+}
+
 function parse(filename){
 	const eson = fs.readFileSync(filename, "utf8");
-	return consumeParseTree(parser.parse(eson));
+
+	let tree = parser.parse(eson);
+
+	// console.log(formatTree(tree));
+
+	return consumeParseTree(tree);
 }
 
 function registerRequireExtension(){
@@ -140,9 +170,57 @@ function registerRequireExtension(){
 	};
 }
 
+function stringify(obj, options = config.stringify || {}){
+	options = Object.assign({
+		minify: false,
+		quote: '"',
+		tab: "\t",
+		arrayTrailingComma: true,
+		objectTrailingComma: true,
+	}, options);
+
+	minify = ((strs, ...keys) => options.minify ? "" : strs.slice(0, -1).reduce((p, s, i) => p + s + keys[i].toString(), "") + strs[strs.length - 1]);
+
+	let type = typeof obj;
+
+	if(type === "symbol") return `Symbol(${stringify(obj.toString().slice(7, -1))})`;
+
+	if(type === "number") return obj.toString();
+
+	if(type === "string") return options.quote + jsStringEscape(obj) + options.quote;
+
+	if(type === "undefined") return "undefined";
+
+	if(type === "function") return "undefined /* function */";
+
+	if(type === "boolean") return obj+"";
+
+	if(obj === null) return "null";
+
+	if(Array.prototype.isPrototypeOf(obj)) {
+		console.log(obj);
+		return `[${
+			obj.map(o => stringify(o)).map(s => {
+				return minify`\n` + minify`${options.tab}` + s.replace(/([^\\]|$)\n/g, `$1\n${options.tab}`);
+			}).join(`,`)
+		}${options.arrayTrailingComma && obj.length ? "," : ""}${obj.filter(e=>e).length ? minify`\n` : ""}]`;
+	}
+
+	let keys = [...Object.getOwnPropertyNames(obj), ...Object.getOwnPropertySymbols(obj)];
+
+	return `${obj.constructor.name in config.classDictionary ? `${obj.constructor.name}${minify` `}` : ""}{${
+		keys.map(key => {
+			let keyText = typeof key === "symbol" ? `[${stringify(key)}]` : varnameRegexAll.exec(key) ? key : stringify(key);
+			let valueText = stringify(obj[key]);
+			return minify`\n` + `${minify`${options.tab}`}${keyText}:${minify` `}${valueText.replace(/([^\\])\n/g, `$1\n${options.tab}`)}`;
+		}).join(`,`)
+	}${options.objectTrailingComma && keys.length ? "," : ""}${keys.length ? minify`\n` : ""}}`;
+}
+
 registerRequireExtension();
 
 module.exports = {
 	parse,
+	stringify,
 	config,
 }

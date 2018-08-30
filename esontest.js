@@ -32,9 +32,16 @@ eson.config({
 		Person: ({ name, age }) => new Person(name, age),
 		Person2,
 	},
+	stringify: {
+
+	}
 })
 
 let data = require("./test.eson");
 
+console.log("test7", data.abc123.test7)
+
 data.abc123.p1.birthday();
 data.abc123.p2.birthday();
+
+require("fs").writeFileSync("./test.eson", eson.stringify(data), "utf8");

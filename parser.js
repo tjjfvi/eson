@@ -2,12 +2,15 @@
 let errors = [];
 let num = 0;
 
+let log = false ? console.log : ()=>{};
+
 class Parser {
-	constructor(lexer) {
+	constructor(lexer, breadthFirst = false) {
 		this.topLevelRule = "topLevel";
 		this.rules = {};
 		this.lexerRuleNames = [];
 		this.lexer = lexer;
+		this.breadthFirst = breadthFirst;
 	}
 
 	addRule(name, rule){
@@ -15,14 +18,16 @@ class Parser {
 	}
 
 	parse(string){
+		console.time("lex");
 		const tokens = this.lexer.lex(string);
+		console.timeEnd("lex");
 		this.lexerRuleNames = this.lexer.ruleNames;
 
+		console.time("parse");
 		const generator = this.evalRule(this.topLevelRule, tokens, 0, true, []);
 		let result = generator.next();
 		let iterations = 0;
 
-		console.time("parse");
 		while(!result.value && !result.done && ++iterations) result = generator.next();
 		console.timeEnd("parse");
 
@@ -55,6 +60,8 @@ class Parser {
 			);
 		}
 
+		log(" ".repeat(path.length), ruleName, "spawn")
+
 		let rule = this.rules[ruleName];
 
 		let generators = rule.map((ar, i) => this.evalAndRule(ar, tokens, ind, mustConsumeAll, {
@@ -69,7 +76,7 @@ class Parser {
 
 			if(done) generators.splice(i--, 1);
 
-			yield value;
+			if(value || this.breadthFirst) yield value;
 		}
 	}
 
@@ -88,7 +95,9 @@ class Parser {
 			:	undefined
 		);
 
-		yield;
+		log(" ".repeat(path.length), treeInfo.ruleName + treeInfo.ruleIndex, "spawn");
+
+		if(this.breadthFirst) yield;
 
 		let generators = [{
 			iteration: 0,
@@ -96,20 +105,24 @@ class Parser {
 			gen: this.evalRule(rule[0], tokens, ind, mustConsumeAll && rule.length === 1, [...path, 0]),
 		}];
 
-		for(let i = 0; true; ++i && (i %= generators.length)) {
-			if(!generators.length) {num--; return;}
+		for(let i = 0; true; (this.breadthFirst ? ++i : true) && (i %= generators.length)) {
+			log(" ".repeat(path.length), treeInfo	.ruleName + treeInfo.ruleIndex, "iteration");
+			if(!generators.length) {log(" ".repeat(path.length), treeInfo.ruleName + treeInfo.ruleIndex, "return"); num--; return;}
 
 			let {gen, iteration, siblings} = generators[i];
 			let {value, done} = gen.next();
 
 			if(done) generators.splice(i--, 1);
 
+			i += generators.length;
+
 			if(!value) {
-				yield;
+				if(this.breadthFirst) yield;
 				continue;
 			}
 
 			if(iteration === rule.length - 1) {
+				log(" ".repeat(path.length), treeInfo.ruleName + treeInfo.ruleIndex, "yield");
 				yield {
 					tree: {
 						leaf: false,
@@ -127,9 +140,9 @@ class Parser {
 				gen: this.evalRule(rule[iteration], tokens, value.ind, mustConsumeAll && iteration === rule.length - 1, [...path, iteration]),
 			};
 
-			generators.splice(ind, 0, newGen);
+			generators.splice(i, 0, newGen);
 
-			yield;
+			if(this.breadthFirst) yield;
 		}
 	}
 

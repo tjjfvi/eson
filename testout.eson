@@ -22,23 +22,14 @@
 		},
 		p1: Person {
 			name: "Jimmy",
-			age: 37,
+			age: 6,
 		},
 		p2: Person2 {
 			name: "Bobby",
-			age: 91,
+			age: 60,
 		},
 		test6: {},
-		test7: [],
-		test8: [
-			1,,
-			2,
-			345,,
-			undefined,,
-			4,
-			5666,,,,,
-		],
-		test9: [,,,,],
+		test7: [,,,,],
 		[Symbol("this is test4")]: -123.456,
 	},
 }

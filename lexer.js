@@ -23,7 +23,7 @@ class Lexer {
 	addRule(rule){
 		rule.regex = new Regex(rule.regex.source, rule.regex.flags);
 		rule.captures = rule.captures || {};
-		if(rule.tokenName && rule.priority) rule.captures[0] = {
+		if(rule.tokenName) rule.captures[0] = {
 			tokenName: rule.tokenName,
 			priority: rule.priority,
 		};
